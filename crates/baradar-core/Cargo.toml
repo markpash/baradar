@@ -3,6 +3,7 @@ name = "baradar-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 description = "Label documents, rendering, export and storage for baradar (a port of the ptouch web studio)"
 

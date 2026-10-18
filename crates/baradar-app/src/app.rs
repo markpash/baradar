@@ -32,6 +32,7 @@ pub struct StudioView {
     batch: Entity<crate::batch::BatchPanel>,
     /// Where a block dragged in the block list would land (insertion index), while dragging.
     pub block_drop: Option<usize>,
+    updater: Entity<crate::update_ui::Updater>,
     _subs: Vec<Subscription>,
 }
 
@@ -42,7 +43,7 @@ impl StudioView {
         crate::diagnostics::packet_log(&studio, cx);
         let name = studio.read(cx).doc.name.clone();
         let name_input = cx.new(|cx| InputState::new(window, cx).default_value(name));
-        let subs = vec![
+        let mut subs = vec![
             cx.observe(&studio, |this, studio, cx| {
                 this.sync_inputs(&studio, cx);
                 cx.notify();
@@ -77,6 +78,9 @@ impl StudioView {
         let props = cx.new(|cx| crate::props::PropertiesView::new(studio.clone(), window, cx));
         let media = cx.new(|cx| crate::media::MediaBar::new(studio.clone(), window, cx));
         let batch = cx.new(|cx| crate::batch::BatchPanel::new(studio.clone(), window, cx));
+        let check_updates = studio.read(cx).prefs.check_updates;
+        let updater = cx.new(|cx| crate::update_ui::Updater::new(check_updates, cx));
+        subs.push(cx.observe(&updater, |_, _, cx| cx.notify()));
         Self {
             studio,
             focus: cx.focus_handle(),
@@ -87,6 +91,7 @@ impl StudioView {
             media,
             batch,
             block_drop: None,
+            updater,
             _subs: subs,
         }
     }
@@ -252,6 +257,10 @@ impl StudioView {
         self.studio_dialog(w, cx, crate::connect::open_printer_settings);
     }
 
+    fn on_check_updates(&mut self, _: &CheckForUpdates, w: &mut Window, cx: &mut Context<Self>) {
+        crate::update_ui::open_update_dialog(self.updater.clone(), self.studio.clone(), w, cx);
+    }
+
     fn on_diagnostics(&mut self, _: &ShowDiagnostics, w: &mut Window, cx: &mut Context<Self>) {
         self.studio_dialog(w, cx, crate::diagnostics::open_diagnostics);
     }
@@ -289,6 +298,14 @@ impl StudioView {
         let connected = is_connected(s.conn);
         let lost = matches!(s.conn, ClientState::Lost | ClientState::NoReply | ClientState::Error);
         let chip_icon = if lost { "alert" } else { "printer" };
+        let update_label = match &self.updater.read(cx).state {
+            crate::update_ui::UpdateState::Available(_) => Some("Update available".to_owned()),
+            crate::update_ui::UpdateState::Downloading { done, total, .. } if *total > 0 => {
+                Some(format!("Updating… {}%", done * 100 / total))
+            }
+            crate::update_ui::UpdateState::Installing => Some("Restarting…".to_owned()),
+            _ => None,
+        };
         // Battery / AC indicator next to the chip (`batteryText`).
         let battery = s.printer_info.as_ref().filter(|_| connected).map(|i| {
             use ptouch::status::{Battery, PowerSource};
@@ -350,6 +367,16 @@ impl StudioView {
                     .on_click(cx.listener(|this, _, _, cx| this.studio.update(cx, |s, cx| s.redo(cx)))),
             )
             .child(div().flex_1())
+            .when_some(update_label, |d, label| {
+                d.child(
+                    Button::new("update-available")
+                        .icon(icon("download"))
+                        .label(label)
+                        .small()
+                        .primary()
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(CheckForUpdates), cx)),
+                )
+            })
             .child(
                 Button::new("theme")
                     .icon(icon(if theme.is_dark() { "moon" } else { "sun" }))
@@ -529,6 +556,7 @@ impl Render for StudioView {
             .on_action(cx.listener(Self::on_fonts))
             .on_action(cx.listener(Self::on_printer_settings))
             .on_action(cx.listener(Self::on_diagnostics))
+            .on_action(cx.listener(Self::on_check_updates))
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)

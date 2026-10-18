@@ -35,6 +35,7 @@ actions!(
         PrinterSettings,
         ShowDiagnostics,
         ShowShortcuts,
+        CheckForUpdates,
     ]
 );
 
@@ -72,6 +73,8 @@ pub fn bind_keys(cx: &mut App) {
 pub fn menus() -> Vec<Menu> {
     vec![
         Menu::new("Baradar").items([
+            MenuItem::action("Check for Updates…", CheckForUpdates),
+            MenuItem::separator(),
             MenuItem::action("Keyboard Shortcuts", ShowShortcuts),
             MenuItem::action("Diagnostics", ShowDiagnostics),
             MenuItem::separator(),

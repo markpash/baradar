@@ -14,6 +14,8 @@ mod preview;
 mod print_bar;
 mod props;
 mod studio;
+mod update_ui;
+mod updater;
 mod view_model;
 
 use anyhow::Context as _;

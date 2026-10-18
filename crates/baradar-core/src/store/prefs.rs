@@ -103,6 +103,8 @@ pub struct Prefs {
     pub design_model: String,
     /// Models whose "untested model" notice was dismissed.
     pub dismissed_untested: Vec<String>,
+    /// Look for a newer nightly build when the app starts.
+    pub check_updates: bool,
 }
 
 impl Default for Prefs {
@@ -125,6 +127,7 @@ impl Default for Prefs {
             recent_fonts: Vec::new(),
             design_model: DEFAULT_DESIGN_MODEL.into(),
             dismissed_untested: Vec::new(),
+            check_updates: true,
         }
     }
 }
@@ -188,6 +191,9 @@ pub fn sanitize_prefs(raw: &Value) -> Prefs {
     }
     if let Some(b) = bool_of("singleKeyShortcuts") {
         p.single_key_shortcuts = b;
+    }
+    if let Some(b) = bool_of("checkUpdates") {
+        p.check_updates = b;
     }
     if let Some(f) = r.get("defaultFont").and_then(Value::as_object) {
         let family = f.get("family").and_then(Value::as_str);
@@ -293,6 +299,7 @@ mod tests {
         let store = Store::open(dir.path()).unwrap();
         assert_eq!(store.load_prefs(), Prefs::default());
         let p = Prefs {
+            check_updates: false,
             last_endpoint: Some("bt:00-11-22-33-44-55".into()),
             recent_fonts: vec!["b:lexend".into()],
             default_text_size: DefaultTextSize::Third,
