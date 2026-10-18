@@ -16,6 +16,8 @@ fn setup(cx: &mut TestAppContext, name: &str) -> (std::path::PathBuf, AnyWindowH
     let _ = std::fs::remove_dir_all(&root);
     let store = Store::open(&root).expect("temp store");
     cx.update(gpui_kit::init);
+    // The printer client runs on its own threads and wakes UI tasks from there.
+    cx.executor().allow_parking();
     let studio = cx.update(|cx| cx.new(|cx| Studio::new(store, cx)));
     let s2 = studio.clone();
     let (window, view) = cx.update(|cx| {

@@ -32,6 +32,8 @@ fn studio_window(cx: &mut TestAppContext, name: &str) -> (std::path::PathBuf, gp
         gpui_kit::init(cx);
         crate::actions::bind_keys(cx);
     });
+    // The printer client runs on its own threads and wakes UI tasks from there.
+    cx.executor().allow_parking();
     let (window, host) = cx.update(|cx| {
         let opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds { origin: Point::default(), size: size(px(1200.), px(900.)) })),
