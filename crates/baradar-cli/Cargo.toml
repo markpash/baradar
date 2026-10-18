@@ -1,0 +1,19 @@
+[package]
+name = "baradar-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line label printing for baradar"
+
+[[bin]]
+name = "baradar"
+path = "src/main.rs"
+
+[dependencies]
+baradar-core = { workspace = true }
+baradar-printer = { workspace = true }
+ptouch = { workspace = true }
+ptouch-transport = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }

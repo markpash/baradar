@@ -1,0 +1,83 @@
+# Vendored from https://github.com/fjanicki/ptouch at rev 485dab45d98083a9124958e531a8f39aede14ecd
+# (crates/ptouch-transport), with the host run loop patch described in PATCHES.md.
+#
+# Upstream inherits most keys from its workspace; they are spelled out here with the values of
+# upstream's workspace at that rev. `ptouch` comes from the same git rev as baradar's own
+# dependency, so both resolve to one package and the types unify.
+
+[package]
+name = "ptouch-transport"
+description = "Native byte transports (serial, Bluetooth RFCOMM, USB, TCP 9100) for Brother P-touch printers"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fjanicki/ptouch"
+authors = ["Frederic Portaria-Janicki"]
+keywords = ["brother", "p-touch", "label-printer", "ptouch", "bluetooth"]
+categories = ["hardware-support"]
+publish = false
+
+[features]
+default = ["usb", "macos-rfcomm", "linux-rfcomm"]
+## USB printer class via nusb (bulk OUT 0x02 / IN 0x81).
+usb = ["dep:nusb"]
+## macOS IOBluetooth RFCOMM backend (no-op on other targets).
+macos-rfcomm = ["dep:objc2", "dep:block2", "dep:dispatch2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-io-bluetooth"]
+## Linux BlueZ raw RFCOMM socket backend (AF_BLUETOOTH via libc; no-op on other targets).
+linux-rfcomm = ["dep:libc"]
+## In-process transport backed by `ptouch::VirtualPrinter` (tests, `--device virtual:`).
+virtual = ["ptouch/virtual"]
+
+[dependencies]
+ptouch = { git = "https://github.com/fjanicki/ptouch", rev = "485dab45d98083a9124958e531a8f39aede14ecd", version = "0.1.0", default-features = false }
+thiserror = "=2.0.21"
+serialport = { version = "=4.10.1", default-features = false }
+nusb = { version = "=0.2.7", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "=0.6.5", optional = true }
+block2 = { version = "=0.6.2", optional = true }
+dispatch2 = { version = "=0.3.1", optional = true }
+objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSArray", "NSDate", "NSObject"] }
+objc2-core-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "CFRunLoop", "CFDate", "CFString"] }
+objc2-io-bluetooth = { version = "=0.3.2", optional = true, default-features = false, features = [
+    "std",
+    "objc2",
+    "objc2-foundation",
+    "Bluetooth",
+    "IOBluetoothObject",
+    "IOBluetoothDevice",
+    "IOBluetoothDevicePair",
+    "IOBluetoothRFCOMMChannel",
+    "IOBluetoothSDPServiceRecord",
+    "IOBluetoothSDPUUID",
+    "IOBluetoothSDPDataElement",
+    "IOBluetoothDeviceInquiry",
+    "IOBluetoothUserLib",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "=0.2.190", optional = true }
+
+# Patch: proves the host run loop dispatch path (PATCHES.md). Needs its own `main` on the
+# process's main thread, hence no libtest harness.
+[[test]]
+name = "host_run_loop"
+harness = false
+required-features = ["macos-rfcomm"]
+
+# Upstream's workspace lints.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "allow"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "allow"
+dbg_macro = "warn"
+print_stdout = "allow"

@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/baradar-core", "crates/baradar-printer", "crates/baradar-cli", "crates/baradar-app", "xtask"]
+default-members = ["crates/baradar-core", "crates/baradar-printer", "crates/baradar-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/markpash/baradar"
+
+[workspace.dependencies]
+baradar-core = { path = "crates/baradar-core" }
+baradar-printer = { path = "crates/baradar-printer" }
+# fjanicki/ptouch is not on crates.io (the `ptouch` name there is a different project), so it is
+# pulled from git and pinned to a commit. Bump `rev` deliberately.
+ptouch = { git = "https://github.com/fjanicki/ptouch", rev = "485dab45d98083a9124958e531a8f39aede14ecd", features = ["std", "virtual"] }
+ptouch-transport = { git = "https://github.com/fjanicki/ptouch", rev = "485dab45d98083a9124958e531a8f39aede14ecd", features = ["virtual"] }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+clap = { version = "4", features = ["derive", "env"] }
+uuid = { version = "1", features = ["v4"] }
+time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-offset"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# ptouch-transport with the macOS "host run loop" patch (vendor/ptouch-transport/PATCHES.md), so
+# Bluetooth works inside a GPUI app whose main thread runs NSApplication.
+[patch."https://github.com/fjanicki/ptouch"]
+ptouch-transport = { path = "vendor/ptouch-transport" }

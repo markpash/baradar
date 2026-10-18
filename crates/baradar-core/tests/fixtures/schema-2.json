@@ -1,0 +1,111 @@
+{
+  "schema": 2,
+  "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f2b01",
+  "name": "Wi-Fi sticker",
+  "createdAt": "2026-10-01T10:00:00.000Z",
+  "updatedAt": "2026-10-02T11:30:00.000Z",
+  "tape": {
+    "widthMm": 12,
+    "mediaId": "tze231-12",
+    "colors": {
+      "tape": "#ffffff",
+      "ink": "#000000"
+    }
+  },
+  "length": {
+    "mode": "fixed",
+    "mm": 40
+  },
+  "marginsMm": {
+    "start": 2,
+    "end": 2
+  },
+  "layout": {
+    "mode": "flow",
+    "gapMm": 2,
+    "align": "center"
+  },
+  "items": [
+    {
+      "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f2a02",
+      "kind": "text",
+      "text": "{{ssid}}",
+      "fontFamily": "archivo-narrow",
+      "fontWeight": 700,
+      "italic": false,
+      "size": {
+        "mode": "fit"
+      },
+      "align": "start",
+      "lineHeight": 1.1,
+      "invert": false,
+      "customFont": {
+        "kind": "user",
+        "ref": "sha256-0123456789abcdef0123456789abcdef",
+        "family": "Inter Display"
+      }
+    },
+    {
+      "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f2a03",
+      "kind": "code",
+      "symbology": "qr",
+      "content": "wifi",
+      "data": "https://example.com/nas",
+      "wifi": {
+        "ssid": "Home",
+        "password": "correct horse",
+        "security": "wpa",
+        "hidden": false
+      },
+      "moduleDots": "auto",
+      "quietZone": "compact",
+      "ecc": "M",
+      "showText": false
+    },
+    {
+      "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f2b04",
+      "kind": "code",
+      "symbology": "datamatrix",
+      "content": "text",
+      "data": "A-{{n}}",
+      "moduleDots": 3,
+      "quietZone": "standard",
+      "ecc": "M",
+      "showText": false
+    }
+  ],
+  "print": {
+    "copies": 2,
+    "autoCut": true,
+    "chain": false,
+    "mirror": false,
+    "threshold": 128
+  },
+  "batch": {
+    "enabled": true,
+    "columns": [
+      "room",
+      "port"
+    ],
+    "rows": [
+      [
+        "Office",
+        "1"
+      ],
+      [
+        "Lab",
+        "2"
+      ]
+    ],
+    "count": 10,
+    "counters": [
+      {
+        "name": "n",
+        "start": 1,
+        "step": 1,
+        "pad": 3
+      }
+    ],
+    "dateFormat": "dmy"
+  }
+}

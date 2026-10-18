@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Repository tasks: `cargo xtask bundle` builds Baradar.app"
+
+[dependencies]
+anyhow = { workspace = true }

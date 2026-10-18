@@ -1,0 +1,58 @@
+name: Nightly
+
+# Every push to main builds Baradar.app and replaces the "nightly" pre-release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push supersedes a build that is still running.
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    name: Test, build and release
+    runs-on: macos-latest
+    permissions:
+      contents: write # replace the nightly release and its tag
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build Baradar.app
+        run: cargo xtask bundle
+
+      - name: Package
+        run: ditto -c -k --keepParent target/Baradar.app target/Baradar-macos-arm64.zip
+
+      - name: Publish the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          short="${GITHUB_SHA::7}"
+          notes="Automatic build of ${short} ($(date -u +%Y-%m-%d)) for Apple silicon Macs.
+
+          The app is ad-hoc signed, not notarised. After unzipping, right-click Baradar.app and choose Open the first time, or run:
+
+              xattr -dr com.apple.quarantine Baradar.app"
+          gh release delete nightly --yes --cleanup-tag || true
+          gh release create nightly target/Baradar-macos-arm64.zip \
+            --target "$GITHUB_SHA" \
+            --title "Nightly (${short})" \
+            --notes "$notes" \
+            --prerelease \
+            --latest=false

@@ -1,0 +1,39 @@
+[package]
+name = "baradar-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Label documents, rendering, export and storage for baradar (a port of the ptouch web studio)"
+
+[dependencies]
+ptouch = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
+# doc: share links, data URLs, content hashes, file names
+base64 = "0.22"
+flate2 = "1"
+sha2 = "0.10"
+unicode-normalization = "0.1"
+# render: text shaping/outlines, rasterising, icons, fonts, images, codes
+rustybuzz = "0.20"
+unicode-bidi = "0.3"
+tiny-skia = "0.12"
+kurbo = "0.11"
+woff2-patched = "0.4"
+brotli = { version = "7", default-features = false, features = ["std"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+fast_qr = { version = "=0.14.0", default-features = false }
+barcoders = { version = "=2.0.0", default-features = false, features = ["std"] }
+datamatrix = { version = "=0.3.3", default-features = false }
+# export
+crc32fast = "1"
+# store
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,14 @@
+{
+  "schema": 99,
+  "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f2a99",
+  "name": "From the future",
+  "createdAt": "2027-01-01T00:00:00.000Z",
+  "updatedAt": "2027-01-01T00:00:00.000Z",
+  "tape": { "widthMm": 18 },
+  "length": { "mode": "auto" },
+  "marginsMm": { "start": 2, "end": 2 },
+  "layout": { "mode": "flow", "gapMm": 3, "align": "center" },
+  "items": [],
+  "print": { "copies": 1, "autoCut": true, "chain": false, "mirror": false, "threshold": 128 },
+  "someFutureField": { "x": 1 }
+}

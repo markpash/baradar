@@ -1,0 +1,61 @@
+{
+  "schema": 4,
+  "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f4b01",
+  "name": "Shelf label (36 mm)",
+  "createdAt": "2026-10-14T09:00:00.000Z",
+  "updatedAt": "2026-10-14T09:20:00.000Z",
+  "tape": {
+    "widthMm": 36,
+    "mediaId": "tze560-36",
+    "model": "PT-P910BT",
+    "colors": {
+      "tape": "#ffd400",
+      "ink": "#000000"
+    }
+  },
+  "length": {
+    "mode": "auto"
+  },
+  "marginsMm": {
+    "start": 2,
+    "end": 2
+  },
+  "layout": {
+    "mode": "flow",
+    "gapMm": 3,
+    "align": "center"
+  },
+  "items": [
+    {
+      "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f4a02",
+      "kind": "icon",
+      "iconId": "archive",
+      "size": {
+        "mode": "mm",
+        "mm": 20
+      }
+    },
+    {
+      "id": "6f1c1f1e-0c1d-4c55-9a43-6d2f0b1f4a03",
+      "kind": "text",
+      "text": "Cables\nUSB-C",
+      "fontFamily": "fira-sans",
+      "fontWeight": 600,
+      "italic": false,
+      "size": {
+        "mode": "pt",
+        "pt": 28
+      },
+      "align": "start",
+      "lineHeight": 1.1,
+      "invert": false
+    }
+  ],
+  "print": {
+    "copies": 1,
+    "autoCut": true,
+    "chain": false,
+    "mirror": false,
+    "threshold": 128
+  }
+}
