@@ -131,6 +131,39 @@ impl SdpQueryTarget {
     }
 }
 
+/// Instance variables of [`ConnectionTarget`].
+pub(crate) struct ConnectionIvars {
+    tx: Sender<c_int>,
+}
+
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements; the class has no Drop impl.
+    #[unsafe(super(NSObject))]
+    #[name = "PtouchTransportConnectionTarget"]
+    #[ivars = ConnectionIvars]
+    pub(crate) struct ConnectionTarget;
+
+    unsafe impl NSObjectProtocol for ConnectionTarget {}
+
+    impl ConnectionTarget {
+        // - (void)connectionComplete:(IOBluetoothDevice *)device status:(IOReturn)status;
+        #[unsafe(method(connectionComplete:status:))]
+        fn connection_complete(&self, _device: Option<&IOBluetoothDevice>, status: c_int) {
+            let _ = self.ivars().tx.send(status);
+        }
+    }
+);
+
+impl ConnectionTarget {
+    /// A target for the async `openConnection:withPageTimeout:authenticationRequired:`,
+    /// reporting the completion status into `tx`.
+    pub(crate) fn new(tx: Sender<c_int>) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(ConnectionIvars { tx });
+        // SAFETY: `init` on a freshly allocated NSObject subclass.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
 /// Instance variables of [`InquiryDelegate`].
 pub(crate) struct InquiryIvars {
     tx: Sender<c_int>,

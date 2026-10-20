@@ -98,3 +98,39 @@ vendored crate is not a workspace member, so `--features` cannot be passed; the 
 
 The patch is self-contained (`src/`: 6 files, +197/−44 lines, about half of it docs) and does
 not change behaviour when `use_host_run_loop` is never called. It could go upstream as is.
+
+## Patch 2: no paging on the main thread
+
+### Problem
+
+With Patch 1, every IOBluetooth job runs on the host's main thread. Three of them were
+synchronous calls that page the device: `openConnection:withPageTimeout:authenticationRequired:`
+with a nil target (step 3), `openRFCOMMChannelSync` (step 5) and the multiplexer prime's
+`openRFCOMMChannelSync` on channel 1 (step 10). While a printer is off or out of range, each one
+blocks the main thread for a page timeout or longer. Baradar auto-reconnects to the last printer
+at launch and retries the open three times, so the whole UI froze for about a minute.
+
+### Change
+
+`macos/rfcomm.rs` (+ `ConnectionTarget` in `macos/delegates.rs`):
+
+- `open_baseband` passes a `ConnectionTarget`, which makes the open asynchronous, and the worker
+  waits (`wait_baseband`, `PAGE_WAIT` = 10 s) for `connectionComplete:status:` while also
+  polling `isConnected` every 200 ms, in case the callback never fires (like
+  `sdpQueryComplete:`). Statuses map as before: success → opened, `kIOReturnTimeout` or no
+  connection by the deadline → fail fast, anything else → let the RFCOMM open page.
+- `open_channel_job` makes the sync attempt only when the baseband is already connected (the
+  usual case after `open_baseband`, and the path verified on hardware); otherwise it goes
+  straight to the async open, which `attempt` already waits for on the worker.
+- `prime_multiplexer` likewise primes with a sync open only over a connected baseband;
+  otherwise it opens channel 1 through `attempt` (async) and closes it.
+
+The remaining main-thread work is short getters/closes, and the `writeSync` fallback of the
+caveat above.
+
+### Verification
+
+Builds and the vendored suite passes. Tested on a PT-E720BT with the bundled app (2026-10-20):
+with the printer off, Baradar's UI stays responsive at launch while the auto-reconnect fails;
+with the printer on, it connects as before. Still unknown: whether `connectionComplete:status:`
+fires on macOS 26/27 (the `isConnected` poll covers it either way).

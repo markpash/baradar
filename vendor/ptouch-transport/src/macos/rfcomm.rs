@@ -11,7 +11,7 @@ use objc2_io_bluetooth::{
     BluetoothRFCOMMChannelID, IOBluetoothDevice, IOBluetoothRFCOMMChannel, IOBluetoothSDPUUID,
 };
 
-use super::delegates::{Event, RfcommDelegate, SdpQueryTarget};
+use super::delegates::{ConnectionTarget, Event, RfcommDelegate, SdpQueryTarget};
 use super::runtime::{self, BtState, OpenChannel};
 use super::{K_IO_RETURN_NOT_OPEN, K_IO_RETURN_SUCCESS, K_IO_RETURN_TIMEOUT, device_for};
 use crate::endpoint::rfcomm::{
@@ -21,6 +21,10 @@ use crate::{BtAddr, OpenOptions, Transport, TransportError, TransportInfo, Trans
 
 /// Baseband page timeout, in 0.625 ms slots (0x2710 = 6.25 s, Brother's value).
 const PAGE_TIMEOUT: u16 = 0x2710;
+/// Worker-side cap on an async baseband open: the page timeout plus slack for bluetoothd.
+const PAGE_WAIT: Duration = Duration::from_secs(10);
+/// How often an async baseband open polls `isConnected` besides waiting for its callback.
+const PAGE_POLL: Duration = Duration::from_millis(200);
 /// SDP polling interval and cap (PROTOCOL.md §2.2 step 4).
 const SDP_POLL: Duration = Duration::from_millis(200);
 const SDP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -128,31 +132,64 @@ fn snapshot(addr: BtAddr) -> Result<DeviceSnapshot, TransportError> {
 }
 
 /// Opens the baseband if needed (step 3). `Ok(true)` when this call opened it.
+///
+/// The open is asynchronous (a `connectionComplete:status:` target) and waited for on the
+/// calling worker: the synchronous form blocks the main thread for the whole page, which in
+/// host mode freezes the application's UI while an offline printer is paged.
 fn open_baseband(addr: BtAddr) -> Result<bool, TransportError> {
-    let st = runtime::call(move |_| {
+    let (tx, rx) = mpsc::channel();
+    let st = runtime::call(move |state: &mut BtState| {
         let dev = device_for(addr)?;
-        // SAFETY: IOBluetooth calls on the main thread.
+        // SAFETY: IOBluetooth calls on the main thread; the target is kept alive below.
         unsafe {
             if dev.isConnected() {
                 return Some(None);
             }
-            Some(Some(
-                dev.openConnection_withPageTimeout_authenticationRequired(
-                    None,
-                    PAGE_TIMEOUT,
-                    false,
-                ),
-            ))
+            let target = ConnectionTarget::new(tx);
+            let target_obj: &AnyObject = &target;
+            let st = dev.openConnection_withPageTimeout_authenticationRequired(
+                Some(target_obj),
+                PAGE_TIMEOUT,
+                false,
+            );
+            state.keep_alive.push(Retained::into_super(target));
+            Some(Some(st))
         }
     })?;
     match st {
         None => Err(TransportError::NotFound(format!("Bluetooth device {addr}"))),
         Some(None) => Ok(false),
-        Some(Some(K_IO_RETURN_SUCCESS)) => Ok(true),
-        // Printer off / out of range: no point in trying RFCOMM.
+        Some(Some(K_IO_RETURN_SUCCESS)) => wait_baseband(addr, &rx),
         Some(Some(K_IO_RETURN_TIMEOUT)) => Err(bt("openConnection", K_IO_RETURN_TIMEOUT)),
         // Anything else: let the RFCOMM open page the device itself.
         Some(Some(_)) => Ok(false),
+    }
+}
+
+/// Waits for an async baseband open: its `connectionComplete:status:`, or `isConnected`
+/// turning true (also polled, in case this IOBluetooth never delivers the callback, as with
+/// `sdpQueryComplete:`). No connection within [`PAGE_WAIT`] counts as a page timeout.
+fn wait_baseband(addr: BtAddr, rx: &Receiver<c_int>) -> Result<bool, TransportError> {
+    let deadline = Instant::now() + PAGE_WAIT;
+    loop {
+        match rx.recv_timeout(PAGE_POLL) {
+            Ok(K_IO_RETURN_SUCCESS) => return Ok(true),
+            // Printer off / out of range: no point in trying RFCOMM.
+            Ok(K_IO_RETURN_TIMEOUT) => return Err(bt("openConnection", K_IO_RETURN_TIMEOUT)),
+            // Anything else: let the RFCOMM open page the device itself.
+            Ok(_) => return Ok(false),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => std::thread::sleep(PAGE_POLL),
+        }
+        // SAFETY: IOBluetooth getter on the main thread.
+        let connected =
+            runtime::call(move |_| device_for(addr).is_some_and(|d| unsafe { d.isConnected() }))?;
+        if connected {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Err(bt("openConnection", K_IO_RETURN_TIMEOUT));
+        }
     }
 }
 
@@ -212,28 +249,90 @@ enum OpenOutcome {
 }
 
 /// Sync open, falling back to async on any failure except `kIOReturnTimeout` (step 5).
+///
+/// Without a baseband connection the sync open would page the device on the main thread
+/// (freezing a host application's UI for the whole page), so only the async open is made then.
 fn open_channel_job(addr: BtAddr, channel: u8) -> Result<OpenOutcome, TransportError> {
     runtime::call(move |state: &mut BtState| {
         let Some(dev) = device_for(addr) else {
             return OpenOutcome::Failed("deviceWithAddressString", K_IO_RETURN_NOT_OPEN);
         };
-        // Sync attempt, with its own delegate/receiver so that late events of a failed attempt
-        // can never be mistaken for the async attempt's completion.
-        let (tx, rx) = mpsc::channel();
-        let delegate = RfcommDelegate::new(tx);
-        let delegate_obj: &AnyObject = &delegate;
-        let mut chan: Option<Retained<IOBluetoothRFCOMMChannel>> = None;
-        // SAFETY: IOBluetooth call on the main thread; the delegate outlives the channel.
-        let st = unsafe {
-            dev.openRFCOMMChannelSync_withChannelID_delegate(
-                Some(&mut chan),
-                channel,
-                Some(delegate_obj),
-            )
-        };
-        if st == K_IO_RETURN_SUCCESS
-            && let Some(channel) = chan.take()
-        {
+        // SAFETY: IOBluetooth getter on the main thread.
+        if unsafe { dev.isConnected() } {
+            match open_channel_sync(state, &dev, channel) {
+                Ok(opened) => return opened,
+                Err(st) if st == K_IO_RETURN_TIMEOUT => {
+                    return OpenOutcome::Failed("openRFCOMMChannelSync", st);
+                }
+                Err(_) => {}
+            }
+        }
+        open_channel_async(state, dev, channel)
+    })
+}
+
+/// `openRFCOMMChannelSync` (main thread). `Err` with the `IOReturn` when it failed.
+fn open_channel_sync(
+    state: &mut BtState,
+    dev: &Retained<IOBluetoothDevice>,
+    channel: u8,
+) -> Result<OpenOutcome, c_int> {
+    // Sync attempt, with its own delegate/receiver so that late events of a failed attempt
+    // can never be mistaken for the async attempt's completion.
+    let (tx, rx) = mpsc::channel();
+    let delegate = RfcommDelegate::new(tx);
+    let delegate_obj: &AnyObject = &delegate;
+    let mut chan: Option<Retained<IOBluetoothRFCOMMChannel>> = None;
+    // SAFETY: IOBluetooth call on the main thread; the delegate outlives the channel.
+    let st = unsafe {
+        dev.openRFCOMMChannelSync_withChannelID_delegate(
+            Some(&mut chan),
+            channel,
+            Some(delegate_obj),
+        )
+    };
+    if st == K_IO_RETURN_SUCCESS
+        && let Some(channel) = chan.take()
+    {
+        let id = state.insert_channel(OpenChannel {
+            channel,
+            delegate,
+            device: dev.clone(),
+            close_baseband: false,
+            pending_writes: HashMap::new(),
+        });
+        return Ok(OpenOutcome::Opened { id, sync: true, rx });
+    }
+    if let Some(c) = chan.take() {
+        // SAFETY: as above.
+        unsafe {
+            c.closeChannel();
+        }
+    }
+    state.keep_alive.push(Retained::into_super(delegate));
+    Err(st)
+}
+
+/// `openRFCOMMChannelAsync` (main thread); completion arrives on the returned receiver.
+fn open_channel_async(
+    state: &mut BtState,
+    dev: Retained<IOBluetoothDevice>,
+    channel: u8,
+) -> OpenOutcome {
+    let (tx, rx) = mpsc::channel();
+    let delegate = RfcommDelegate::new(tx);
+    let delegate_obj: &AnyObject = &delegate;
+    let mut chan: Option<Retained<IOBluetoothRFCOMMChannel>> = None;
+    // SAFETY: IOBluetooth call on the main thread; the delegate outlives the channel.
+    let st = unsafe {
+        dev.openRFCOMMChannelAsync_withChannelID_delegate(
+            Some(&mut chan),
+            channel,
+            Some(delegate_obj),
+        )
+    };
+    match chan.take() {
+        Some(channel) if st == K_IO_RETURN_SUCCESS => {
             let id = state.insert_channel(OpenChannel {
                 channel,
                 delegate,
@@ -241,71 +340,45 @@ fn open_channel_job(addr: BtAddr, channel: u8) -> Result<OpenOutcome, TransportE
                 close_baseband: false,
                 pending_writes: HashMap::new(),
             });
-            return OpenOutcome::Opened { id, sync: true, rx };
-        }
-        if let Some(c) = chan.take() {
-            // SAFETY: as above.
-            unsafe {
-                c.closeChannel();
+            OpenOutcome::Opened {
+                id,
+                sync: false,
+                rx,
             }
         }
-        state.keep_alive.push(Retained::into_super(delegate));
-        if st == K_IO_RETURN_TIMEOUT {
-            return OpenOutcome::Failed("openRFCOMMChannelSync", st);
-        }
-
-        let (tx, rx) = mpsc::channel();
-        let delegate = RfcommDelegate::new(tx);
-        let delegate_obj: &AnyObject = &delegate;
-        let mut chan: Option<Retained<IOBluetoothRFCOMMChannel>> = None;
-        // SAFETY: as above.
-        let st = unsafe {
-            dev.openRFCOMMChannelAsync_withChannelID_delegate(
-                Some(&mut chan),
-                channel,
-                Some(delegate_obj),
+        other => {
+            if let Some(c) = other {
+                // SAFETY: as above.
+                unsafe {
+                    c.closeChannel();
+                }
+            }
+            state.keep_alive.push(Retained::into_super(delegate));
+            OpenOutcome::Failed(
+                "openRFCOMMChannelAsync",
+                if st == K_IO_RETURN_SUCCESS {
+                    K_IO_RETURN_NOT_OPEN
+                } else {
+                    st
+                },
             )
-        };
-        match chan.take() {
-            Some(channel) if st == K_IO_RETURN_SUCCESS => {
-                let id = state.insert_channel(OpenChannel {
-                    channel,
-                    delegate,
-                    device: dev,
-                    close_baseband: false,
-                    pending_writes: HashMap::new(),
-                });
-                OpenOutcome::Opened {
-                    id,
-                    sync: false,
-                    rx,
-                }
-            }
-            other => {
-                if let Some(c) = other {
-                    // SAFETY: as above.
-                    unsafe {
-                        c.closeChannel();
-                    }
-                }
-                state.keep_alive.push(Retained::into_super(delegate));
-                OpenOutcome::Failed(
-                    "openRFCOMMChannelAsync",
-                    if st == K_IO_RETURN_SUCCESS {
-                        K_IO_RETURN_NOT_OPEN
-                    } else {
-                        st
-                    },
-                )
-            }
         }
-    })
+    }
 }
 
 /// Opens channel 1 and closes it again to prime a cold RFCOMM multiplexer (step 10).
-fn prime_multiplexer(addr: BtAddr) -> Result<(), TransportError> {
-    runtime::call(move |state: &mut BtState| {
-        let Some(dev) = device_for(addr) else { return };
+///
+/// The sync open is only made over an existing baseband connection; without one it would page
+/// the device on the main thread, so channel 1 is opened asynchronously instead.
+fn prime_multiplexer(addr: BtAddr, opts: &OpenOptions) -> Result<(), TransportError> {
+    let primed = runtime::call(move |state: &mut BtState| {
+        let Some(dev) = device_for(addr) else {
+            return true;
+        };
+        // SAFETY: IOBluetooth getter on the main thread.
+        if !unsafe { dev.isConnected() } {
+            return false;
+        }
         let (tx, _rx) = mpsc::channel();
         let delegate = RfcommDelegate::new(tx);
         let delegate_obj: &AnyObject = &delegate;
@@ -322,7 +395,12 @@ fn prime_multiplexer(addr: BtAddr) -> Result<(), TransportError> {
             }
         }
         state.keep_alive.push(Retained::into_super(delegate));
+        true
     })?;
+    if !primed && let Attempt::Accepted(mut t) = MacRfcommTransport::attempt(addr, 1, opts, false)?
+    {
+        let _ = t.close();
+    }
     std::thread::sleep(PRIME_PAUSE);
     Ok(())
 }
@@ -400,7 +478,7 @@ impl MacRfcommTransport {
     ) -> Result<Self, TransportError> {
         if let Some(ch) = channel {
             if ch != 1 {
-                prime_multiplexer(addr)?;
+                prime_multiplexer(addr, opts)?;
             }
             return match Self::attempt(addr, ch, opts, false)? {
                 Attempt::Accepted(t) => Ok(t),
@@ -438,7 +516,7 @@ impl MacRfcommTransport {
             }
             tried.push(ch);
             if ch != 1 {
-                prime_multiplexer(addr)?;
+                prime_multiplexer(addr, opts)?;
             }
             match Self::attempt(addr, ch, opts, true)? {
                 Attempt::Accepted(t) => return Ok(t),
